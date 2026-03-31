@@ -138,8 +138,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:va
     <div class="title">우리 가계부 💑</div>
     <div class="sub">순자산 · 주식 · 월별 흐름 · 집 마련 목표</div>
   </div>
-  <button class="btn btn-sm" onclick="go('add',document.querySelectorAll('.tab')[4])">+ 기록</button>
+  <div style="display:flex;gap:6px;align-items:center">
+    <button class="btn btn-sm" onclick="exportData()" title="데이터 내보내기">📤 내보내기</button>
+    <label class="btn btn-sm" style="cursor:pointer;margin:0" title="데이터 가져오기">📥 가져오기<input type="file" accept=".json" onchange="importData(event)" style="display:none"></label>
+    <button class="btn btn-sm" onclick="go('add',document.querySelectorAll('.tab')[5])">+ 기록</button>
+  </div>
 </div>
+
+<!-- 내보내기/가져오기 모달 -->
+<div id="sync-toast" style="display:none;position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#1a1a1a;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2)"></div>
 
 <div class="tabs">
   <button class="tab on" onclick="go('networth',this)">순자산</button>
@@ -171,10 +178,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:va
       <div class="fg"><label>전세 대출 (원)</label><input type="number" id="cfg-loan" placeholder="150000000" oninput="saveCfg()"></div>
     </div>
     <div class="form-row">
-      <div class="fg"><label>현금/저축 추가 (원)</label><input type="number" id="cfg-cash" placeholder="0" oninput="saveCfg()"></div>
+      <div class="fg"><label>현금/저축 추가 (원) <span style="font-weight:400;color:#5F5E5A">— 기록하기 저축 외 별도 보유액</span></label><input type="number" id="cfg-cash" placeholder="0" oninput="saveCfg()"></div>
       <div class="fg"><label>기타 부채 (원)</label><input type="number" id="cfg-debt" placeholder="0" oninput="saveCfg()"></div>
     </div>
-    <div style="font-size:11px;color:var(--text3)">* 주식 평가금액은 주식 탭에서 자동 반영돼요</div>
+    <div style="font-size:11px;color:var(--text3)">* 주식 평가금액은 주식 탭에서 자동 반영돼요 &nbsp;·&nbsp; 기록하기의 저축 누계는 현금·저축에 자동 합산돼요</div>
   </div>
 </div>
 
@@ -511,7 +518,9 @@ function networth(){return(cfg.deposit-cfg.loan)+stockTotal()+pensionTotal()+(cf
 function renderAll(){renderNetworth();renderStock();renderPension();renderMonthly();renderGoal();renderHist();}
 
 function renderNetworth(){
-  const nw=networth(),pt=pensionTotal(),st=stockTotal(),equity=cfg.deposit-cfg.loan,cash=cfg.cash+totalSavings();
+  const nw=networth(),pt=pensionTotal(),st=stockTotal(),equity=cfg.deposit-cfg.loan;
+  const savingsFromRecs=totalSavings();
+  const cash=cfg.cash+savingsFromRecs;
   document.getElementById('nw-total').textContent=fmtM(nw);
   document.getElementById('nw-sub').textContent=`전세자기자본 ${fmtM(equity)} + 미국주식 ${fmtM(st)} + 연금저축 ${fmtM(pt)} + 현금/저축 ${fmtM(cash)}`;
   const total=equity+st+pt+cash||1;
@@ -521,8 +530,8 @@ function renderNetworth(){
   document.getElementById('asset-cards').innerHTML=`
     <div class="sc green"><div class="sc-lbl">전세 자기자본</div><div class="sc-val">${fmtM(equity)}</div><div class="sc-sub">보증금−대출</div></div>
     <div class="sc purple"><div class="sc-lbl">미국주식·ETF</div><div class="sc-val">${fmtM(st)}</div><div class="sc-sub">${stocks.length}종목 (USD)</div></div>
-    <div class="sc amber"><div class="sc-lbl">연금저축펀드</div><div class="sc-val">${fmtM(pt)}</div><div class="sc-sub">${pensionEtfs.length}종목 (원화)</div></div>
-    <div class="sc blue"><div class="sc-lbl">현금·저축</div><div class="sc-val">${fmtM(cash)}</div><div class="sc-sub">통장+저축누계</div></div>`;
+    <div class="sc amber"><div class="sc-lbl">연금저축펀드</div><div class="sc-val">${fmtM(pt)}</div><div class="sc-sub">${pensionEtfs.length+pensionChildEtfs.length}종목 (원화)</div></div>
+    <div class="sc blue"><div class="sc-lbl">현금·저축</div><div class="sc-val">${fmtM(cash)}</div><div class="sc-sub">기록저축 ${fmtM(savingsFromRecs)} + 별도 ${fmtM(cfg.cash)}</div></div>`;
 }
 
 function renderPension(){
@@ -762,6 +771,49 @@ async function handleImg(e){
 }
 
 function exportCSV(){if(!recs.length){alert('기록이 없어요');return;}const rows=[['날짜','구분','금액','메모']];recs.sort((a,b)=>b.date.localeCompare(a.date)).forEach(r=>rows.push([r.date,typeLabel[r.type]||r.type,r.amount,r.memo||'']));const csv='\uFEFF'+rows.map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download='가계부전체.csv';a.click();}
+
+function showToast(msg, duration=2500){
+  const t=document.getElementById('sync-toast');
+  t.textContent=msg;t.style.display='block';
+  setTimeout(()=>t.style.display='none', duration);
+}
+
+function exportData(){
+  const payload={recs,stocks,pensionEtfs,pensionRecs,pensionChildEtfs,pensionChildRecs,cfg,budget,goalCfg,exportedAt:new Date().toISOString()};
+  const json=JSON.stringify(payload, null, 2);
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([json],{type:'application/json'}));
+  const date=new Date().toISOString().slice(0,10);
+  a.download=`yulfam_${date}.json`;
+  a.click();
+  showToast('📤 데이터 내보내기 완료! 파일을 저장해두세요.');
+}
+
+function importData(e){
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const d=JSON.parse(ev.target.result);
+      if(!d.recs&&!d.stocks){alert('올바른 가계부 파일이 아니에요.');return;}
+      const confirmed=confirm(`📥 데이터를 가져올까요?\n\n기록 ${(d.recs||[]).length}건, 주식 ${(d.stocks||[]).length}종목\n내보낸 날짜: ${d.exportedAt?d.exportedAt.slice(0,10):'알 수 없음'}\n\n⚠️ 현재 데이터는 덮어씌워져요.`);
+      if(!confirmed)return;
+      recs=d.recs||[];
+      stocks=d.stocks||[];
+      pensionEtfs=d.pensionEtfs||[];
+      pensionRecs=d.pensionRecs||[];
+      pensionChildEtfs=d.pensionChildEtfs||[];
+      pensionChildRecs=d.pensionChildRecs||[];
+      cfg=Object.assign({deposit:430000000,loan:150000000,cash:0,debt:0},d.cfg);
+      budget=Object.assign({fixed:0,food:0,living:0},d.budget);
+      goalCfg=Object.assign({target:0},d.goalCfg);
+      save();loadCfgInputs();loadBudgetInputs();renderAll();
+      showToast('📥 데이터 가져오기 완료!');
+    }catch(err){alert('파일을 읽는 중 오류가 발생했어요.');}
+    e.target.value='';
+  };
+  reader.readAsText(file);
+}
 
 init();
 </script>
